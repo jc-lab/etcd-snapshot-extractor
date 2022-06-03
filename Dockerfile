@@ -5,7 +5,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -y update && \
     apt-get -y install \
     golang-go make gcc git \
-    curl
+    curl jq
 
 RUN mkdir -p /build && \
     cd /build && \

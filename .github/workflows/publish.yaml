@@ -1,0 +1,57 @@
+on:
+  push: {}
+  pull_request: {}
+  release:
+    types: [published]
+jobs:
+  push_to_registry:
+    name: Push Docker image to gchr.io
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Set Release Image Name
+        if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
+        run: |
+          echo "IMAGE_VERSION=release-${GITHUB_REF#refs/*/v}" >> $GITHUB_ENV
+          echo "NEED_IMAGE_PUSH=true" >> $GITHUB_ENV
+          echo "LATEST_IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/mailserver:latest" >> $GITHUB_ENV
+      - name: Set Taged Image Name
+        if: ${{ !(github.event_name == 'release' && github.event.action == 'published') }}
+        run: |
+          echo "LATEST_IMAGE_NAME=" >> $GITHUB_ENV
+          echo "${GITHUB_REF}" | grep "refs/tags" >/dev/null && echo "NEED_IMAGE_PUSH=true" >> $GITHUB_ENV || true
+          (echo "${GITHUB_REF}" | grep "refs/tags" >/dev/null && echo "IMAGE_VERSION=tag-${GITHUB_REF#refs/*/v}" || echo "IMAGE_VERSION=commit-${GITHUB_SHA::8}") >> $GITHUB_ENV
+      
+      - name: Cache Docker Layers
+        uses: actions/cache@v2
+        with:
+          path: /tmp/.buildx-cache
+          key: "${{ runner.os }}-buildx01-${{ github.sha }}"
+          restore-keys: "${{ runner.os }}-buildx01-"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v1
+        if: ${{ env.NEED_IMAGE_PUSH == 'true' }}
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.CR_PAT }}
+      - name: build and push
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: Dockerfile
+          cache-from: type=local,src=/tmp/.buildx-cache-new
+          cache-to: type=local,dest=/tmp/.buildx-cache-new
+          push: ${{ env.NEED_IMAGE_PUSH == 'true' }}
+          tags: |
+            ${{ env.LATEST_IMAGE_NAME }}
+            ghcr.io/${{ github.repository_owner }}/etcd-snapshot-extractor:${{ env.IMAGE_VERSION }}
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
